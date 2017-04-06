@@ -1,0 +1,13 @@
+{
+    "name": "dbmover/indexes",
+    "description": "Dbmover plugin to migrate indexes",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Marijn Ophorst",
+            "email": "marijn@monomelodies.nl"
+        }
+    ],
+    "require": {}
+}
