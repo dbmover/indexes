@@ -14,7 +14,9 @@ use PDO;
 
 abstract class Plugin extends Core\Plugin
 {
-    const REGEX = "@^CREATE\s+(UNIQUE\s+)?INDEX\s+([^\s]+?)\s+ON\s+([^\s\(]+)(\s+USING \w+)?\s*\((.*?)\);$@ms";
+    const REGEX = "@^CREATE\s+(UNIQUE\s+)?INDEX\s+([^\s]+?)?\s*ON\s+([^\s\(]+)(\s+USING \w+)?\s*\((.*)\).*?;$@m";
+
+    public $description = 'Checking index (re)creation...';
 
     public function __invoke(string $sql) : string
     {
@@ -23,8 +25,9 @@ abstract class Plugin extends Core\Plugin
             foreach ($matches as $index) {
                 $name = strlen($index[2])
                     ? $index[2]
-                    : $index[3].'_'.preg_replace("@,\s*@", '_', $index[5]).'_idx';
+                    : preg_replace("@[\W_]+@", '_', "{$index[3]}_{$index[5]}_idx");
                 $index[5] = preg_replace("@,\s+@", ',', $index[5]);
+                $index[1] = trim($index[1]);
                 $index[4] = trim($index[4]);
                 $requestedIndexes[$name] = $index;
                 $sql = str_replace($index[0], '', $sql);
@@ -33,22 +36,27 @@ abstract class Plugin extends Core\Plugin
         if (preg_match_all("@^ALTER TABLE\s+([^\s]+?)\s+ADD PRIMARY KEY\((.*?)\)@", $sql, $matches, PREG_SET_ORDER)) {
             foreach ($matches as $index) {
                 $index[5] = $index[4];
-                $index[4] = '';
-                $requestedIndexes["{$index[1]}_PRIMARY"] = $index;
+                $name = "{$index[1]}_PRIMARY";
+                $index[4] = $name;
+                $requestedIndexes[$name] = $index;
                 $sql = str_replace($index[0], '', $sql);
             }
         }
-        if (preg_match_all("@^CREATE TABLE\s+([^\s]+?)\s+.*?^\s*([^\s]+)\s.*?PRIMARY KEY@ms", $sql, $matches, PREG_SET_ORDER)) {
-            foreach ($matches as $index) {
-                $name = "{$index[1]}_PRIMARY";
-                $requestedIndexes[$name] = [
-                    "ALTER TABLE {$index[1]} ADD PRIMARY KEY({$index[2]})",
-                    'UNIQUE',
-                    $index[1],
-                    '',
-                    '',
-                    $index[2],
-                ];
+        if (preg_match_all("@^CREATE TABLE\s+([^\s]+?)\s+\((.*?)^\)@ms", $sql, $pktables, PREG_SET_ORDER)) {
+            foreach ($pktables as $pktable) {
+                if (preg_match("@^\s+([^\s]+).*?PRIMARY KEY@m", $pktable[0], $pk)
+                    || preg_match("@^\s+PRIMARY KEY\((.*?)\)@m", $pktable[0], $pk)
+                ) {
+                    $name = "{$pktable[1]}_PRIMARY";
+                    $requestedIndexes[$name] = [
+                        "ALTER TABLE {$pktable[1]} ADD PRIMARY KEY({$pk[1]})",
+                        'UNIQUE',
+                        '',
+                        '',
+                        $name,
+                        $pk[1]
+                    ];
+                }
             }
         }
 
@@ -58,16 +66,17 @@ abstract class Plugin extends Core\Plugin
                 $old['index_name'] = "{$old['table_name']}_PRIMARY";
             }
             if (!isset($requestedIndexes[$old['index_name']])
-                || $old['column_name'] != $requestedIndexes[$old['index_name']][5]
+                || strtolower($old['column_name']) != strtolower($requestedIndexes[$old['index_name']][5])
                 || $old['non_unique'] != ($requestedIndexes[$old['index_name']][1] == 'UNIQUE' ? 0 : 1)
-                || $old['type'] != $requestedIndexes[$old['index_name']][4]
+                || (!preg_match("@_PRIMARY$@", $old['index_name'])
+                    && strtolower($old['type']) != strtolower($requestedIndexes[$old['index_name']][4])
+                )
             ) {
-                var_dump($old, $requestedIndexes[$old['index_name']]);
                 // Index has changed, so it needs to be rebuilt.
                 if (preg_match('@_PRIMARY$@', $old['index_name'])) {
-                    $this->loader->addOperation($this->dropPrimaryKey($old['table_name']));
+                    $this->defer($this->dropPrimaryKey($old['index_name'], $old['table_name']));
                 } else {
-                    $this->loader->addOperation($this->dropIndex($old['index_name'], $old['table_name']));
+                    $this->defer($this->dropIndex($old['index_name'], $old['table_name']));
                 }
             } else {
                 // Index is already there, so ignore it.
