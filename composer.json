@@ -11,5 +11,10 @@
     ],
     "require": {
         "dbmover/core": "^0.6.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dbmover\\Indexes\\": "./src"
+        }
     }
 }
