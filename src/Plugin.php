@@ -17,9 +17,15 @@ abstract class Plugin extends Core\Plugin
     const REGEX = "@^CREATE\s+(UNIQUE\s+)?INDEX\s+([^\s]+?)?\s*ON\s+([^\s\(]+)(\s+USING \w+)?\s*\((.*)\).*?;$@m";
     const DEFAULT_INDEX_TYPE = '';
 
+    /** @var string */
     public $description = 'Checking index (re)creation...';
+    /** @var array */
     protected $requestedIndexes = [];
 
+    /**
+     * @param string $sql
+     * @return string
+     */
     public function __invoke(string $sql) : string
     {
         if (preg_match_all(static::REGEX, $sql, $matches, PREG_SET_ORDER)) {
@@ -95,6 +101,7 @@ abstract class Plugin extends Core\Plugin
         return $sql;
     }
 
+    /** @return array */
     protected abstract function existingIndexes() : array;
 }
 
